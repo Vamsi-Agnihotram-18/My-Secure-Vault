@@ -1,0 +1,123 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "vault.labels" . | nindent 4 }}
+spec:
+  replicas: 3
+  serviceName: vault-cluster
+  podManagementPolicy: Parallel
+  updateStrategy:
+    type: OnDelete
+  selector:
+    matchLabels:
+      {{- include "vault.selectorLabels" . | nindent 6}}
+  template:
+    metadata:
+      labels:
+        {{- include "vault.labels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ .Release.Name }}
+      dnsPolicy: ClusterFirst
+      terminationGracePeriodSeconds: 10
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  {{- include "vault.selectorLabels" . | nindent 18 }}
+              topologyKey: kubernetes.io/hostname
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+        - name: vault
+          image: {{ .Values.server.image }}
+          imagePullPolicy: IfNotPresent
+          command: ["/usr/bin/dumb-init", "/bin/vault", "server", "-config", "/vault/config/server.hcl"]
+          ports:
+            - name: data
+              protocol: TCP
+              containerPort: 8200
+            - name: cluster
+              protocol: TCP
+              containerPort: 8201
+          env:
+            - name: VAULT_K8S_POD_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.name
+            - name: VAULT_K8S_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.namespace
+            - name: HOME
+              value: /home/vault
+            - name: VAULT_ADDR
+              value: https://$(VAULT_K8S_POD_NAME).vault-cluster:8200
+            - name: VAULT_API_ADDR
+              value: https://$(VAULT_K8S_POD_NAME).vault-cluster:8200
+            - name: VAULT_CLUSTER_ADDR
+              value: https://$(VAULT_K8S_POD_NAME).vault-cluster:8201
+            - name: VAULT_CACERT
+              value: /vault/userconfig/tls.ca
+            - name: VAULT_LOG_FORMAT
+              value: json
+            - name: VAULT_LOG_LEVEL
+              value: info
+            - name: VAULT_SEAL_TYPE
+              value: gcpckms
+            {{- include "vault.environmentVars" .Values.server | nindent 12 }}
+          readinessProbe:
+            exec:
+              command: ["/bin/sh", "-ec", "vault status -tls-skip-verify"]
+            initialDelaySeconds: 5
+            periodSeconds: 2
+            successThreshold: 1
+            failureThreshold: 3
+            timeoutSeconds: 3
+          resources: {}
+          securityContext:
+            allowPrivilegeEscalation: false
+          volumeMounts:
+            - name: home
+              mountPath: /home/vault
+              readOnly: false
+            - name: data
+              mountPath: /vault/data
+              readOnly: false
+            - name: config
+              mountPath: /vault/config
+              readOnly: true
+            - name: userconfig
+              mountPath: /vault/userconfig
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: {{ .Release.Name }}-server-config
+            defaultMode: 420
+        - name: userconfig
+          secret:
+            secretName: {{ .Release.Name }}-tls-certificate
+            defaultMode: 420
+        - name: home
+          emptyDir: {}
+  volumeClaimTemplates:
+    - apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: {{ .Values.server.storage.capacity }}
+        volumeMode: Filesystem

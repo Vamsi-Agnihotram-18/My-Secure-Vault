@@ -1,0 +1,23 @@
+#
+# All null values supplied by the scripts/vault-deploy.sh script
+#
+google:
+  region: null
+server:
+  image: null
+  service:
+    active:
+      loadBalancerIP: null
+  serviceAccount:
+    gcpSA: null
+  tls:
+    CA: null
+    Crt: null
+    Key: null
+  environmentVars:
+    GOOGLE_PROJECT: null
+    GOOGLE_REGION: null
+    VAULT_GCPCKMS_SEAL_KEY_RING: null
+    VAULT_GCPCKMS_SEAL_CRYPTO_KEY: null
+  storage:
+    capacity: 10Gi
